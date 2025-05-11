@@ -1,0 +1,56 @@
+import 'dotenv/config';
+import fs from 'fs';
+import path from 'path';
+import { Client, Collection, GatewayIntentBits, Partials } from 'discord.js';
+import { initializeApp, applicationDefault } from 'firebase-admin/app';
+import { getFirestore } from 'firebase-admin/firestore';
+
+// Initialize Firebase Admin
+initializeApp({
+  credential: applicationDefault(),
+});
+const db = getFirestore();
+
+// Create Discord client
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.MessageContent
+  ],
+  partials: [Partials.Message, Partials.Channel, Partials.GuildMember]
+});
+
+// Attach collections & DB
+client.commands = new Collection();
+client.db = db;
+
+// Load command files
+const commandsPath = path.resolve('commands');
+for (const category of fs.readdirSync(commandsPath)) {
+  const categoryPath = path.join(commandsPath, category);
+  for (const file of fs.readdirSync(categoryPath).filter(f => f.endsWith('.js'))) {
+    const cmd = await import(path.join(categoryPath, file));
+    client.commands.set(cmd.default.data.name, cmd.default);
+  }
+}
+
+// Interaction handler
+client.on('interactionCreate', async interaction => {
+  if (!interaction.isChatInputCommand()) return;
+  const command = client.commands.get(interaction.commandName);
+  if (!command) return;
+  try {
+    await command.execute(interaction, client);
+  } catch (err) {
+    console.error(err);
+    await interaction.reply({ content: '❌ Error executing command.', ephemeral: true });
+  }
+});
+
+// Login
+client.once('ready', () => {
+  console.log(`Logged in as ${client.user.tag}`);
+});
+client.login(process.env.TOKEN);
